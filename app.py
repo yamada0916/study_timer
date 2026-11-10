@@ -31,6 +31,30 @@ def initialize_database():
     with get_db_connection() as connection:
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS shelves(
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            parent_id INTEGER ,
+            FOREIGN KEY(parent_id) REFERENCES shelves(id)
+            )
+            """
+        )
+        connection.execute(
+           """
+            CREATE TABLE IF NOT EXISTS books(
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            time INTEGER NOT NULL DEFAULT 0,
+            rate INTEGER NOT NULL DEFAULT 0,
+            shelf_id INTEGER,
+            FOREIGN KEY(shelf_id) REFERENCES shelves(id)
+            )
+           """
+        )
+
+
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS study_subjects (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -54,11 +78,24 @@ def initialize_database():
 initialize_database()
 
 
-@app.route("/")
+@app.route("/",methods = ['GET','POST'])
 def home():
+
     with get_db_connection() as connection:
-        subjects = connection.execute("SELECT * FROM study_subjects ORDER BY id").fetchall()
-        total = connection.execute("SELECT COALESCE(SUM(time), 0) FROM study_subjects").fetchone()[0]
+            if request.method == 'POST':
+                name = request.form["name"]
+                connection.execute(
+                """
+                INSERT INTO shelves(name) VALUES (?)
+                """,(name,)
+                )
+                connection.commit()
+                return redirect(url_for("home"))
+            
+            subjects = connection.execute("SELECT * FROM study_subjects ORDER BY id").fetchall()
+            total = connection.execute("SELECT COALESCE(SUM(time), 0) FROM study_subjects").fetchone()[0]
+            shelves = connection.execute("SELECT * FROM shelves WHERE parent_id IS NULL").fetchall()
+
 
     html = f"""
     <h1>ようこそ</h1>
@@ -67,6 +104,16 @@ def home():
     <form action="{url_for('reset')}" method="POST">
         <button type="submit">データをリセット</button>
     </form>
+    
+    <form method = "POST">
+    <p>本棚の名前：
+        <input type = 'text' name = 'name'>
+    </p>
+    
+    <button type = 'submit'>本棚を追加</button>
+    </form>
+
+
     """
 
     for subject in subjects:
@@ -80,8 +127,15 @@ def home():
         </a>
         """
 
-    return html
 
+    for shelf in shelves:
+        html += f"""
+        <p>
+            本棚：{shelf["name"]}
+            <a href = "/shelves/{shelf['id']}">詳細</a>
+        </p>
+        """
+    return html
 
 @app.route("/reset", methods=["POST"])
 def reset():
