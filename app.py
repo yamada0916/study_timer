@@ -6,10 +6,7 @@ from flask import Flask, abort, redirect, request, url_for
 app = Flask(__name__)
 
 DATABASE_PATH = Path(__file__).with_name("study_timer.db")
-INITIAL_SUBJECTS = [
-    ("basic", "基本情報", 0, 2),
-    ("mathA", "数学A", 0, 3),
-]
+
 
 
 def get_db_connection():
@@ -17,14 +14,7 @@ def get_db_connection():
     connection.row_factory = sqlite3.Row
     return connection
 
-#dbリセットボタン。操作確認のため。
-def reset_subjects(connection):
-    connection.execute("DELETE FROM study_subjects")
-    connection.executemany(
-        "INSERT INTO study_subjects (id, name, time, rate) VALUES (?, ?, ?, ?)",
-        INITIAL_SUBJECTS,
-    )
-    connection.commit()
+
 
 
 def initialize_database():
@@ -53,28 +43,6 @@ def initialize_database():
         )
 
 
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS study_subjects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                time INTEGER NOT NULL DEFAULT 0,
-                rate INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        subject_count = connection.execute(
-            "SELECT COUNT(*) FROM study_subjects"
-        ).fetchone()[0]
-
-        if subject_count == 0:
-            connection.executemany(
-                "INSERT INTO study_subjects (id, name, time, rate) VALUES (?, ?, ?, ?)",
-                INITIAL_SUBJECTS,
-            )
-        connection.commit()
-
-
 initialize_database()
 
 
@@ -91,19 +59,11 @@ def home():
                 )
                 connection.commit()
                 return redirect(url_for("home"))
-            
-            subjects = connection.execute("SELECT * FROM study_subjects ORDER BY id").fetchall()
-            total = connection.execute("SELECT COALESCE(SUM(time), 0) FROM study_subjects").fetchone()[0]
             shelves = connection.execute("SELECT * FROM shelves WHERE parent_id IS NULL").fetchall()
 
 
     html = f"""
     <h1>ようこそ</h1>
-    <p>総勉強時間：{total}時間</p>
-
-    <form action="{url_for('reset')}" method="POST">
-        <button type="submit">データをリセット</button>
-    </form>
     
     <form method = "POST">
     <p>本棚の名前：
@@ -115,18 +75,6 @@ def home():
 
 
     """
-
-    for subject in subjects:
-        html += f"""
-        <hr>
-        <h2>{subject['name']}</h2>
-        <p>勉強時間：{subject['time']}時間</p>
-        <p>自己評価：{subject['rate']}</p>
-        <a href="/{subject['id']}">
-            <button>詳細</button>
-        </a>
-        """
-
 
     for shelf in shelves:
         html += f"""
@@ -142,16 +90,31 @@ def shelf_detail(shelf_id):
     with get_db_connection() as connection:
             if request.method =="POST":
                 name = request.form['name']
-                connection.execute(
-                    """INSERT INTO shelves(name, parent_id) VALUES (?,?)
-                """,(name,shelf_id)
-                )
+                kind = request.form["kind"]
+                if kind == "shelf":      
+                    connection.execute(
+                        """INSERT INTO shelves(name, parent_id) VALUES (?,?)
+                    """,(name,shelf_id)
+                    )
+                
+                elif kind == "book":
+                    connection.execute(
+                         """INSERT INTO books(name,shelf_id) VALUES(?,?)
+                    """,(name,shelf_id)
+                    )
+
                 connection.commit()
                 return redirect(url_for("shelf_detail", shelf_id = shelf_id))
-            
+                
+        
             shelves = connection.execute(
                 "SELECT * FROM shelves WHERE parent_id = ?",
                 (shelf_id,)
+            ).fetchall()
+
+            books = connection.execute(
+                 "SELECT * FROM books WHERE shelf_id = ?",
+                 (shelf_id,)
             ).fetchall()
 
             shelf = connection.execute(
@@ -168,8 +131,16 @@ def shelf_detail(shelf_id):
     本棚の名前：
         <input type = "text" name = "name">
         </p>
-        <button type = 'submit'>本棚を追加</button>
+        <button type = 'submit' name = "kind" value="shelf">本棚を追加</button>
     </form>        
+
+    <form method="POST">
+    <p>
+    本の名前：
+        <input type = "text" name = "name" >
+        </p>
+        <button type = "submit" name = "kind" value="book">本を追加</button>
+    </form>
     """
 
     if shelf['parent_id'] is not None:
@@ -185,47 +156,37 @@ def shelf_detail(shelf_id):
             <a href = "/shelves/{shelf['id']}">詳細</a>
         </p>
         """
+    for book in books:
+         html += f"""
+        <p>
+            本：{book["name"]}
+            <a href = "/books/{book['id']}">詳細</a>
+        </p>
+        """
     return html
                 
 
-@app.route("/reset", methods=["POST"])
-def reset():
-    with get_db_connection() as connection:
-        reset_subjects(connection)
-    return redirect(url_for("home"))
-
-
-@app.route("/<subject_id>", methods=["GET", "POST"])
-def subject_detail(subject_id):
-    with get_db_connection() as connection:
-        subject = connection.execute(
-            "SELECT * FROM study_subjects WHERE id = ?",
-            (subject_id,)
-        ).fetchone()
-
-        if request.method == "POST":
-            added_time = int(request.form['time'])
-            rate = int(request.form['rate'])
-
-            connection.execute(
-            """        
-                UPDATE study_subjects
-                SET time = time + ?,
-                rate = ?
-                WHERE id = ?
-            """,
-            (added_time, rate, subject_id)
-            )
-
-            connection.commit()
-
-            subject = connection.execute(
-            "SELECT * FROM study_subjects WHERE id = ?",
-            (subject_id,)
-        ).fetchone()
 
             
-        
+@app.route("/books/<int:book_id>",methods=["GET"])
+def book_detail(book_id):
+    with get_db_connection() as connection:
+         book = connection.execute("""
+        SELECT * FROM books WHERE id = ?""",
+        (book_id,)
+         ).fetchone()
+
+    html = f"""
+    <h1>本：{book["name"]}の詳細</h1>
+    <p>勉強時間：{book["time"]}分</p>
+    <p>自己評価：{book["rate"]}/10</p>
+    
+    <a href="{url_for('shelf_detail', shelf_id = book['shelf_id'])}">親本棚に戻る</a>
+    """
+    return html
+
+
+
 
            
             
