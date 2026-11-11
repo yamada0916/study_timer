@@ -137,6 +137,57 @@ def home():
         """
     return html
 
+@app.route("/shelves/<int:shelf_id>", methods=["GET","POST"])
+def shelf_detail(shelf_id):
+    with get_db_connection() as connection:
+            if request.method =="POST":
+                name = request.form['name']
+                connection.execute(
+                    """INSERT INTO shelves(name, parent_id) VALUES (?,?)
+                """,(name,shelf_id)
+                )
+                connection.commit()
+                return redirect(url_for("shelf_detail", shelf_id = shelf_id))
+            
+            shelves = connection.execute(
+                "SELECT * FROM shelves WHERE parent_id = ?",
+                (shelf_id,)
+            ).fetchall()
+
+            shelf = connection.execute(
+                "SELECT * FROM shelves WHERE id = ?",
+                (shelf_id,)
+            ).fetchone()
+
+
+    html = f"""
+    <h1>本棚：{shelf['name']}：の一覧</h1>
+    <a href="{url_for('home')}">ホームに戻る</a>
+    <form method="POST">
+    <p>
+    本棚の名前：
+        <input type = "text" name = "name">
+        </p>
+        <button type = 'submit'>本棚を追加</button>
+    </form>        
+    """
+
+    if shelf['parent_id'] is not None:
+            html += f"""
+            <a href="{url_for('shelf_detail', shelf_id = shelf['parent_id'])}">親本棚に戻る</a>
+            """
+        
+
+    for shelf in shelves:
+        html += f"""
+        <p>
+            本棚：{shelf["name"]}
+            <a href = "/shelves/{shelf['id']}">詳細</a>
+        </p>
+        """
+    return html
+                
+
 @app.route("/reset", methods=["POST"])
 def reset():
     with get_db_connection() as connection:
